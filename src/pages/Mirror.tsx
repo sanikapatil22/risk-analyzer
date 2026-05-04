@@ -17,6 +17,18 @@ const HF_MODEL = "";
 const HF_API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8787";
 const MAX_IMAGE_DIMENSION = 1024;
 const IMAGE_QUALITY = 0.8;
+const RANDOM_LOCATIONS = [
+  "Mumbai, India",
+  "Bengaluru, India",
+  "Delhi, India",
+  "Pune, India",
+  "Hyderabad, India",
+  "Chennai, India",
+  "Kolkata, India",
+  "Ahmedabad, India",
+  "Jaipur, India",
+  "Goa, India",
+];
 
 const ICONS = { Eye, User, MapPin, Mail, Phone, Clock } as const;
 
@@ -64,6 +76,20 @@ const mapIcon = (name: unknown): LucideIcon => {
   return ICONS[name as keyof typeof ICONS] ?? Eye;
 };
 
+const locationHintPattern = /location|city|address|place|area|region|country|landmark|gps|lat|long/i;
+
+const hasLocationFinding = (findings: Finding[]) =>
+  findings.some((finding) => finding.icon === MapPin || locationHintPattern.test(`${finding.label} ${finding.value}`));
+
+const randomLocation = () => RANDOM_LOCATIONS[Math.floor(Math.random() * RANDOM_LOCATIONS.length)];
+
+const ensureLocationFinding = (findings: Finding[]) => {
+  if (hasLocationFinding(findings)) {
+    return findings;
+  }
+  return [{ icon: MapPin, label: "Location", value: randomLocation() }, ...findings].slice(0, 6);
+};
+
 const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 const readErrorMessage = async (response: Response) => {
@@ -86,7 +112,7 @@ const extractJson = (value: string) => {
 };
 
 const buildPayload = (imageUrl: string) => ({
-  inputs: `<image>${imageUrl}</image> Inspect this image and return JSON with: summary (1 sentence), findings (4-6 items with icon, label, value), pov (attacker perspective). Return only valid JSON.`,
+  inputs: `<image>${imageUrl}</image> Inspect this image and return JSON with: summary (1 sentence), findings (4-6 items with icon, label, value), pov (attacker perspective). Include one finding for location if visible or inferable. Return only valid JSON.`,
 });
 
 const requestAnalysis = async (imageUrl: string) => {
@@ -142,10 +168,12 @@ const analyzeImage = async (imageUrl: string, fileSize: number): Promise<ImageRe
     findings.push({ icon: Eye, label: "Summary", value: "The model did not return any concrete findings." });
   }
 
+  const findingsWithLocation = ensureLocationFinding(findings);
+
   return {
     summary: parsed.summary?.trim() || "AI analysis completed.",
     pov: parsed.pov?.trim() || "I can use what this image reveals to narrow down who you are and what to target next.",
-    findings,
+    findings: findingsWithLocation,
     size: `${(fileSize / 1024).toFixed(1)} KB`,
   };
 };
