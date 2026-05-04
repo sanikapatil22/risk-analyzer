@@ -13,12 +13,22 @@ export default {
       },
     },
     extend: {
+      fontFamily: {
+        display: ['"Archivo Black"', 'sans-serif'],
+        sans: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'monospace'],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
+        safe: { DEFAULT: "hsl(var(--safe))", foreground: "hsl(var(--safe-foreground))" },
+        warn: { DEFAULT: "hsl(var(--warn))", foreground: "hsl(var(--warn-foreground))" },
+        danger: { DEFAULT: "hsl(var(--danger))", foreground: "hsl(var(--danger-foreground))" },
+        hot: { DEFAULT: "hsl(var(--hot))", foreground: "hsl(var(--hot-foreground))" },
+        cyber: { DEFAULT: "hsl(var(--cyber))", foreground: "hsl(var(--cyber-foreground))" },
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
