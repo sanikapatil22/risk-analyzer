@@ -4,6 +4,13 @@ export default {
   darkMode: ["class"],
   content: ["./pages/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
   prefix: "",
+  safelist: [
+    "bg-accent","bg-cyber","bg-hot","bg-danger","bg-warn","bg-safe","bg-muted",
+    "bg-accent/20","bg-cyber/20","bg-hot/20","bg-danger/20","bg-warn/20","bg-safe/20","bg-muted/20",
+    "bg-accent/30","bg-cyber/30","bg-hot/30","bg-danger/30","bg-warn/30","bg-safe/30",
+    "hover:bg-accent/30","hover:bg-cyber/30","hover:bg-hot/30","hover:bg-danger/30","hover:bg-warn/30","hover:bg-safe/30",
+    "text-danger-foreground","text-hot-foreground","text-cyber-foreground","text-safe-foreground","text-warn-foreground",
+  ],
   theme: {
     container: {
       center: true,
