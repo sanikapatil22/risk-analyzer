@@ -23,7 +23,7 @@ export default function Analyze() {
     <>
       <PageHeader
         kicker="01 // Analyze"
-        title={<>Show me what <span className="bg-accent px-2">this site</span> really does.</>}
+        title={<>You see a  <span className="bg-accent px-2">website.</span> They see a  <span className="bg-accent px-2">target.</span> </>}
         subtitle="Paste any URL. We mirror back its tech stack, headers, cookies, trackers, and what could go wrong in the next week."
       />
 

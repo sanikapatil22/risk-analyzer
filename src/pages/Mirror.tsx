@@ -6,21 +6,9 @@ import { motion } from "framer-motion";
 type Finding = { icon: LucideIcon; label: string; value: string };
 type ImageReport = { findings: Finding[]; pov: string; size: string; summary: string };
 
-type HFMessagePart =
-  | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string } };
-
-type HFResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string;
-    };
-  }>;
-};
-
-const HF_TOKEN = import.meta.env.VITE_HF_TOKEN ?? "";
-const HF_MODEL = import.meta.env.VITE_HF_MODEL ?? "HuggingFaceTB/SmolVLM2-2.2B-Instruct:fastest";
-const HF_API_URL = import.meta.env.VITE_HF_API_URL ?? "https://router.huggingface.co/v1/chat/completions";
+const HF_TOKEN = "";
+const HF_MODEL = "";
+const HF_API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
 
 const ICONS = { Eye, User, MapPin, Mail, Phone, Clock } as const;
 
@@ -59,58 +47,32 @@ const extractJson = (value: string) => {
 };
 
 const buildPayload = (imageUrl: string) => ({
-  model: HF_MODEL,
-  temperature: 0.2,
-  messages: [
-    {
-      role: "system",
-      content: "You analyze uploaded images for privacy and exposure risks. Return only JSON.",
-    },
-    {
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text:
-            "Inspect the uploaded image and return JSON with: summary (1 sentence), findings (4-6 concrete items with icon, label, value), and pov (a concise first-person attacker perspective based on what is visible). Use only details that are visible or strongly inferable from the image. Be specific and avoid generic filler.",
-        },
-        {
-          type: "image_url",
-          image_url: { url: imageUrl },
-        },
-      ] satisfies HFMessagePart[],
-    },
-  ],
+  inputs: `<image>${imageUrl}</image> Inspect this image and return JSON with: summary (1 sentence), findings (4-6 items with icon, label, value), pov (attacker perspective). Return only valid JSON.`,
 });
 
 const requestAnalysis = async (imageUrl: string) => {
-  const response = await fetch(HF_API_URL, {
+  const response = await fetch(`${HF_API_URL}/api/analyze-image`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${HF_TOKEN}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(buildPayload(imageUrl)),
+    body: JSON.stringify({ imageUrl }),
   });
 
   if (!response.ok) {
     throw new Error(await readErrorMessage(response));
   }
 
-  const payload = (await response.json()) as HFResponse;
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
-    throw new Error("AI returned an empty response.");
+  const payload = (await response.json()) as Array<{ generated_text?: string }> | { error?: string };
+  if (Array.isArray(payload)) {
+    const content = payload[0]?.generated_text;
+    if (!content) throw new Error("AI returned an empty response.");
+    return extractJson(content);
   }
-
-  return extractJson(content);
+  throw new Error("Invalid response format from AI.");
 };
 
 const analyzeImage = async (file: File): Promise<ImageReport> => {
-  if (!HF_TOKEN) {
-    throw new Error("Missing VITE_HF_TOKEN. Add it to your .env file before uploading images.");
-  }
-
   const imageUrl = await fileToDataUrl(file);
   const parsed = await requestAnalysis(imageUrl).catch(async (error) => {
     const message = error instanceof Error ? error.message : "AI request failed.";
