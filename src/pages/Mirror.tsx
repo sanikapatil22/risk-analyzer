@@ -1,48 +1,177 @@
 import { useState, useRef } from "react";
 import PageHeader from "@/components/PageHeader";
-import { Camera, Eye, MapPin, Mail, Phone, Clock, User, Trash2 } from "lucide-react";
+import { Camera, Eye, MapPin, Mail, Phone, Clock, User, Trash2, type LucideIcon } from "lucide-react";
 import { motion } from "framer-motion";
 
-type Finding = { icon: any; label: string; value: string };
+type Finding = { icon: LucideIcon; label: string; value: string };
+type ImageReport = { findings: Finding[]; pov: string; size: string; summary: string };
+
+type HFMessagePart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
+type HFResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+};
+
+const HF_TOKEN = import.meta.env.VITE_HF_TOKEN ?? "";
+const HF_MODEL = import.meta.env.VITE_HF_MODEL ?? "HuggingFaceTB/SmolVLM2-2.2B-Instruct:fastest";
+const HF_API_URL = import.meta.env.VITE_HF_API_URL ?? "https://router.huggingface.co/v1/chat/completions";
+
+const ICONS = { Eye, User, MapPin, Mail, Phone, Clock } as const;
+
+const fileToDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the image file."));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(file);
+  });
+
+const mapIcon = (name: unknown): LucideIcon => {
+  if (typeof name !== "string") return Eye;
+  return ICONS[name as keyof typeof ICONS] ?? Eye;
+};
+
+const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const readErrorMessage = async (response: Response) => {
+  try {
+    const payload = await response.json();
+    return payload?.error?.message ?? payload?.message ?? `AI request failed (${response.status})`;
+  } catch {
+    return `AI request failed (${response.status})`;
+  }
+};
+
+const extractJson = (value: string) => {
+  const trimmed = value.trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("AI returned a non-JSON response.");
+  }
+  return JSON.parse(trimmed.slice(start, end + 1)) as Partial<ImageReport> & { findings?: Array<{ icon?: string; label?: string; value?: string }> };
+};
+
+const buildPayload = (imageUrl: string) => ({
+  model: HF_MODEL,
+  temperature: 0.2,
+  messages: [
+    {
+      role: "system",
+      content: "You analyze uploaded images for privacy and exposure risks. Return only JSON.",
+    },
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text:
+            "Inspect the uploaded image and return JSON with: summary (1 sentence), findings (4-6 concrete items with icon, label, value), and pov (a concise first-person attacker perspective based on what is visible). Use only details that are visible or strongly inferable from the image. Be specific and avoid generic filler.",
+        },
+        {
+          type: "image_url",
+          image_url: { url: imageUrl },
+        },
+      ] satisfies HFMessagePart[],
+    },
+  ],
+});
+
+const requestAnalysis = async (imageUrl: string) => {
+  const response = await fetch(HF_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${HF_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(buildPayload(imageUrl)),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response));
+  }
+
+  const payload = (await response.json()) as HFResponse;
+  const content = payload?.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) {
+    throw new Error("AI returned an empty response.");
+  }
+
+  return extractJson(content);
+};
+
+const analyzeImage = async (file: File): Promise<ImageReport> => {
+  if (!HF_TOKEN) {
+    throw new Error("Missing VITE_HF_TOKEN. Add it to your .env file before uploading images.");
+  }
+
+  const imageUrl = await fileToDataUrl(file);
+  const parsed = await requestAnalysis(imageUrl).catch(async (error) => {
+    const message = error instanceof Error ? error.message : "AI request failed.";
+    if (/429|rate limit|quota|insufficient/i.test(message)) {
+      await delay(1200);
+      return requestAnalysis(imageUrl);
+    }
+    throw error;
+  });
+
+  const findings = Array.isArray(parsed.findings)
+    ? parsed.findings.slice(0, 6).map((finding) => ({
+        icon: mapIcon(finding.icon),
+        label: finding.label?.trim() || "Finding",
+        value: finding.value?.trim() || "No detail provided.",
+      }))
+    : [];
+
+  if (findings.length === 0) {
+    findings.push({ icon: Eye, label: "Summary", value: "The model did not return any concrete findings." });
+  }
+
+  return {
+    summary: parsed.summary?.trim() || "AI analysis completed.",
+    pov: parsed.pov?.trim() || "I can use what this image reveals to narrow down who you are and what to target next.",
+    findings,
+    size: `${(file.size / 1024).toFixed(1)} KB`,
+  };
+};
 
 export default function Mirror() {
   const [img, setImg] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [report, setReport] = useState<{ findings: Finding[]; pov: string; size: string } | null>(null);
+  const [report, setReport] = useState<ImageReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const onFile = (f: File) => {
+  const onFile = async (f: File) => {
     setName(f.name);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result as string;
-      setImg(url);
-      // fake "extraction" deterministic on filename
-      const seed = [...f.name].reduce((a, c) => a + c.charCodeAt(0), 0);
-      const findings: Finding[] = [];
-      const possibleText = ["@gmail.com", "TechCorp ID #4421", "+1 415 555-0182", "MetaBank Statement"][seed % 4];
-      findings.push({ icon: Eye, label: "Visible text", value: possibleText });
-      findings.push({ icon: User, label: "Faces detected", value: `${(seed % 3) + 1}` });
-      if (seed % 2) findings.push({ icon: MapPin, label: "GPS in EXIF", value: `37.77${seed%99},-122.41${seed%99}  (San Francisco)` });
-      findings.push({ icon: Clock, label: "Timestamp", value: new Date(Date.now() - seed*60000).toLocaleString() });
-      if (seed % 3) findings.push({ icon: Mail, label: "Possible email", value: `j.${f.name.split(".")[0].toLowerCase()}@gmail.com` });
-      if (seed % 4) findings.push({ icon: Phone, label: "Possible phone", value: "+1 (415) 555-01" + (seed%99) });
-      const pov = `Hi. I'm an attacker with internet access and 6 minutes.
+    setError(null);
+    setAnalyzing(true);
+    setReport(null);
 
-From your photo I can already guess:
-• You work somewhere near downtown SF (background skyline + office badge)
-• Your morning coffee shop is in the same block
-• Your full name is probably on LinkedIn under that workplace
-• I have your phone number and a likely personal email
-• I can send a 'HR document' as your boss within the hour
-
-This wasn't a hack. You posted it.`;
-      setReport({ findings, pov, size: (f.size/1024).toFixed(1) + " KB" });
-    };
-    reader.readAsDataURL(f);
+    try {
+      const imageUrl = await fileToDataUrl(f);
+      setImg(imageUrl);
+      const aiReport = await analyzeImage(f);
+      setReport(aiReport);
+    } catch (err) {
+      setReport(null);
+      setImg(null);
+      setName("");
+      setError(err instanceof Error ? err.message : "Image analysis failed.");
+      if (inputRef.current) inputRef.current.value = "";
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
-  const wipe = () => { setImg(null); setReport(null); setName(""); if (inputRef.current) inputRef.current.value = ""; };
+  const wipe = () => { setImg(null); setReport(null); setName(""); setError(null); if (inputRef.current) inputRef.current.value = ""; };
 
   return (
     <>
@@ -68,15 +197,18 @@ This wasn't a hack. You posted it.`;
               <Trash2 className="w-4 h-4"/> WIPE NOW
             </button>
           )}
-          {name && <div className="mono text-xs mt-2 opacity-70">{name} · {report?.size}</div>}
+            {name && <div className="mono text-xs mt-2 opacity-70">{name} · {report?.size}</div>}
+            {error && <div className="brutal-sm bg-danger/20 border-2 border-foreground px-3 py-2 mt-3 mono text-xs">{error}</div>}
         </div>
 
         <div className="space-y-5">
-          {!report && <div className="brutal p-8 text-center opacity-50 mono text-sm">drop something to see what leaks...</div>}
+            {!report && !analyzing && !error && <div className="brutal p-8 text-center opacity-50 mono text-sm">drop something to see what leaks...</div>}
+            {analyzing && <div className="brutal p-8 text-center mono text-sm bg-foreground text-background">AI is reading the image for clues...</div>}
           {report && (
             <>
               <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="brutal p-5">
                 <div className="display text-lg mb-3">EXTRACTED</div>
+                  <p className="mono text-xs uppercase tracking-widest opacity-60 mb-3">{report.summary}</p>
                 <ul className="space-y-2">
                   {report.findings.map((f, i) => (
                     <li key={i} className="flex items-start gap-3 border-b border-foreground/20 pb-2">
