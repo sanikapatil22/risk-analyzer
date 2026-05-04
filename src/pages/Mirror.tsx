@@ -6,9 +6,17 @@ import { motion } from "framer-motion";
 type Finding = { icon: LucideIcon; label: string; value: string };
 type ImageReport = { findings: Finding[]; pov: string; size: string; summary: string };
 
+type BackendResponse =
+  | Array<{ generated_text?: string }>
+  | { generated_text?: string }
+  | { choices?: Array<{ message?: { content?: string } }> }
+  | { error?: string };
+
 const HF_TOKEN = "";
 const HF_MODEL = "";
-const HF_API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
+const HF_API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8787";
+const MAX_IMAGE_DIMENSION = 1024;
+const IMAGE_QUALITY = 0.8;
 
 const ICONS = { Eye, User, MapPin, Mail, Phone, Clock } as const;
 
@@ -20,6 +28,37 @@ const fileToDataUrl = (file: File) =>
     reader.readAsDataURL(file);
   });
 
+const loadImage = (src: string) =>
+  new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not process the image file."));
+    image.src = src;
+  });
+
+const compressImageFile = async (file: File) => {
+  const source = await fileToDataUrl(file);
+  const image = await loadImage(source);
+  const largestSide = Math.max(image.width, image.height);
+  const scale = Math.min(1, MAX_IMAGE_DIMENSION / largestSide);
+
+  if (scale === 1) {
+    return source;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return source;
+  }
+
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", IMAGE_QUALITY);
+};
+
 const mapIcon = (name: unknown): LucideIcon => {
   if (typeof name !== "string") return Eye;
   return ICONS[name as keyof typeof ICONS] ?? Eye;
@@ -30,7 +69,7 @@ const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve
 const readErrorMessage = async (response: Response) => {
   try {
     const payload = await response.json();
-    return payload?.error?.message ?? payload?.message ?? `AI request failed (${response.status})`;
+    return payload?.error?.message ?? payload?.error ?? payload?.message ?? `AI request failed (${response.status})`;
   } catch {
     return `AI request failed (${response.status})`;
   }
@@ -63,17 +102,25 @@ const requestAnalysis = async (imageUrl: string) => {
     throw new Error(await readErrorMessage(response));
   }
 
-  const payload = (await response.json()) as Array<{ generated_text?: string }> | { error?: string };
+  const payload = (await response.json()) as BackendResponse;
+
+  let content = "";
   if (Array.isArray(payload)) {
-    const content = payload[0]?.generated_text;
-    if (!content) throw new Error("AI returned an empty response.");
-    return extractJson(content);
+    content = payload[0]?.generated_text ?? "";
+  } else if ("generated_text" in payload) {
+    content = payload.generated_text ?? "";
+  } else if ("choices" in payload) {
+    content = payload.choices?.[0]?.message?.content ?? "";
   }
-  throw new Error("Invalid response format from AI.");
+
+  if (typeof content !== "string" || !content.trim()) {
+    throw new Error("AI returned an empty response.");
+  }
+
+  return extractJson(content);
 };
 
-const analyzeImage = async (file: File): Promise<ImageReport> => {
-  const imageUrl = await fileToDataUrl(file);
+const analyzeImage = async (imageUrl: string, fileSize: number): Promise<ImageReport> => {
   const parsed = await requestAnalysis(imageUrl).catch(async (error) => {
     const message = error instanceof Error ? error.message : "AI request failed.";
     if (/429|rate limit|quota|insufficient/i.test(message)) {
@@ -99,7 +146,7 @@ const analyzeImage = async (file: File): Promise<ImageReport> => {
     summary: parsed.summary?.trim() || "AI analysis completed.",
     pov: parsed.pov?.trim() || "I can use what this image reveals to narrow down who you are and what to target next.",
     findings,
-    size: `${(file.size / 1024).toFixed(1)} KB`,
+    size: `${(fileSize / 1024).toFixed(1)} KB`,
   };
 };
 
@@ -118,9 +165,9 @@ export default function Mirror() {
     setReport(null);
 
     try {
-      const imageUrl = await fileToDataUrl(f);
+      const imageUrl = await compressImageFile(f);
       setImg(imageUrl);
-      const aiReport = await analyzeImage(f);
+      const aiReport = await analyzeImage(imageUrl, f.size);
       setReport(aiReport);
     } catch (err) {
       setReport(null);

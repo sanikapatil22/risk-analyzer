@@ -24,7 +24,7 @@ export default function Analyze() {
       <PageHeader
         kicker="01 // Analyze"
         title={<>You see a  <span className="bg-accent px-2">website.</span> They see a  <span className="bg-accent px-2">target.</span> </>}
-        subtitle="Paste any URL. We mirror back its tech stack, headers, cookies, trackers, and what could go wrong in the next week."
+        subtitle="Paste any URL.We uncover hidden signals—trackers, weak points, and data leaks—and show how someone could turn them into an attack."
       />
 
       <section className="max-w-[1400px] mx-auto px-4 lg:px-8 py-10">
