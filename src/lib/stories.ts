@@ -1,5 +1,5 @@
 export type StoryNode = {
-  id: string;
+  id?: string;
   speaker?: string;
   text: string;
   ending?: "win" | "lose" | "neutral";
